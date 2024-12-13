@@ -1,0 +1,919 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+class User
+{
+    public string Username { get; set; }
+    public string Password { get; set; }
+    public string Role { get; set; }
+
+    public override string ToString()
+    {
+        return $"{Username}|{Password}|{Role}";
+    }
+
+    public static User FromString(string userData)
+    {
+        var parts = userData.Split('|');
+        return new User { Username = parts[0], Password = parts[1], Role = parts[2] };
+    }
+}
+
+class UserManager
+{
+    private List<User> users = new List<User>();
+    private string userFilePath = "UserData.txt";
+
+    public UserManager()
+    {
+        LoadUsersFromFile();
+    }
+
+    public User Login(string username, string password)
+    {
+        return users.Find(user => user.Username == username && user.Password == password);
+    }
+
+    public void Register(User newUser)
+    {
+        if (users.Exists(user => user.Username == newUser.Username))
+        {
+            Console.WriteLine("Username already exists. Please choose a different username.");
+            return;
+        }
+
+        users.Add(newUser);
+        SaveUsersToFile();
+        Console.WriteLine("Registration successful!");
+    }
+
+    private void LoadUsersFromFile()
+    {
+        if (!File.Exists(userFilePath))
+        {
+            return;
+        }
+
+        var lines = File.ReadAllLines(userFilePath);
+        foreach (var line in lines)
+        {
+            users.Add(User.FromString(line));
+        }
+    }
+
+    private void SaveUsersToFile()
+    {
+        var lines = new List<string>();
+        foreach (var user in users)
+        {
+            lines.Add(user.ToString());
+        }
+        File.WriteAllLines(userFilePath, lines);
+    }
+    public void ViewAllUsers()
+    {
+        if (users.Count == 0)
+        {
+            Console.WriteLine("No users found.");
+            return;
+        }
+        else
+        {
+            Console.WriteLine("\n~ All Users ~");
+            Console.WriteLine("------------------------------");
+            Console.WriteLine("| Username     | Role        |");
+            Console.WriteLine("------------------------------");
+        }
+
+        foreach (var user in users)
+        {
+            Console.WriteLine($"| {user.Username,-12} | {user.Role,-11} |");
+        }
+        Console.WriteLine("------------------------------");
+        Console.WriteLine($"Total Users: {users.Count}");
+    }
+    public (bool success, string error) DeleteAccount(string username, string password)
+    {
+        // First check for borrowed books
+        var borrowedBooksPath = "BorrowedBooksData.txt";
+        if (File.Exists(borrowedBooksPath))
+        {
+            var borrowedBooks = File.ReadAllLines(borrowedBooksPath)
+                .Where(line => line.StartsWith(username + "|"))
+                .ToList();
+            if (borrowedBooks.Any())
+            {
+                return (false, "Cannot delete account. Please return all borrowed books first.");
+            }
+        }
+
+        var user = users.Find(u => u.Username == username && u.Password == password);
+        if (user != null)
+        {
+            users.Remove(user);
+            SaveUsersToFile();
+            return (true, null);
+        }
+        return (false, "Invalid password. Account deletion cancelled.");
+    }
+}
+abstract class LibraryOperation
+{
+    public abstract void Execute();
+}
+class Book
+{
+    public int Id { get; set; }
+    public string Title { get; set; }
+    public string Author { get; set; }
+    public int PublicationYear { get; set; }
+
+    public static Book FromString(string bookData)
+    {
+        var parts = bookData.Split('|');
+
+        Book book = new Book();
+        book.Id = int.Parse(parts[0]);
+        book.Title = parts[1];
+        book.Author = parts[2];
+        book.PublicationYear = int.Parse(parts[3]);
+
+        return book;
+    }
+
+    public override string ToString()
+    {
+        return $"{Id}|{Title}|{Author}|{PublicationYear}";
+    }
+}
+
+class Library
+{
+    private List<Book> books = new List<Book>();
+    private List<BorrowedBook> borrowedBooks = new List<BorrowedBook>();
+    private string filePath = "LibraryData.txt";
+    private string borrowedBooksFilePath = "BorrowedBooksData.txt";
+
+    public Library()
+    {
+        LoadBooksFromFile();
+        LoadBorrowedBooksFromFile();
+    }
+
+    public void AddBook(Book book)
+    {
+        bool isDuplicateInAvailable = books.Exists(b => b.Id == book.Id);
+        bool isDuplicateInBorrowed = borrowedBooks.Exists(bb => bb.Book.Id == book.Id);
+
+        if (isDuplicateInAvailable || isDuplicateInBorrowed)
+        {
+            Console.WriteLine("Duplicate book ID found. Please enter a different ID.");
+            return;
+        }
+        else
+        {
+            books.Add(book);
+            Console.WriteLine("Book added successfully!");
+            SaveBooksToFile();
+        }
+    }
+
+    public void ViewBooks(string username)
+    {
+        Console.WriteLine("~ List of Available Books ~");
+
+        if (books.Count == 0)
+        {
+            Console.WriteLine("No books available in the library.");
+        }
+        else
+        {
+            Console.WriteLine("--------------------------------------------------------");
+            Console.WriteLine("| ID   | Title                | Author         | Year |");
+            Console.WriteLine("--------------------------------------------------------");
+
+            foreach (var book in books)
+            {
+                Console.WriteLine($"| {book.Id,-4} | {book.Title,-20} | {book.Author,-15} | {book.PublicationYear,-4} |");
+            }
+
+            Console.WriteLine("--------------------------------------------------------");
+        }
+
+        Console.WriteLine($"\n~ Books Borrowed by {username} ~");
+        var userBorrowedBooks = borrowedBooks.Where(bb => bb.Username == username).ToList();
+
+        if (userBorrowedBooks.Count == 0)
+        {
+            Console.WriteLine("You haven't borrowed any books.");
+        }
+        else
+        {
+            Console.WriteLine("--------------------------------------------------------");
+            Console.WriteLine("| ID   | Title                | Author         | Year |");
+            Console.WriteLine("--------------------------------------------------------");
+
+            foreach (var borrowedBook in userBorrowedBooks)
+            {
+                var book = borrowedBook.Book;
+                Console.WriteLine($"| {book.Id,-4} | {book.Title,-20} | {book.Author,-15} | {book.PublicationYear,-4} |");
+            }
+
+            Console.WriteLine("--------------------------------------------------------");
+        }
+    }
+
+    public void BorrowBook(int id, string username)
+    {
+        Book book = books.Find(b => b.Id == id);
+        if (book != null)
+        {
+            books.Remove(book);
+            borrowedBooks.Add(new BorrowedBook { Username = username, Book = book });
+            Console.WriteLine("Book borrowed successfully!");
+            SaveBooksToFile();
+            SaveBorrowedBooksToFile();
+        }
+        else
+        {
+            Console.WriteLine("Book is unavailable.");
+        }
+    }
+
+    public void ReturnBook(int id, string username)
+    {
+        var borrowedBook = borrowedBooks.FirstOrDefault(bb => bb.Book.Id == id && bb.Username == username);
+        if (borrowedBook != null)
+        {
+            borrowedBooks.Remove(borrowedBook);
+            books.Add(borrowedBook.Book);
+            Console.WriteLine("Book returned successfully!");
+            SaveBooksToFile();
+            SaveBorrowedBooksToFile();
+        }
+        else
+        {
+            Console.WriteLine("This book was not borrowed by you or doesn't exist.");
+        }
+    }
+
+    public void RemoveBook(int id)
+    {
+        Book book = books.Find(b => b.Id == id);
+        if (book != null)
+        {
+            books.Remove(book);
+            Console.WriteLine("Book removed successfully!");
+            SaveBooksToFile();
+        }
+        else
+        {
+            Console.WriteLine("Book not found.");
+        }
+    }
+
+    public void EditBook(int id, string newTitle, string newAuthor, int newPublicationYear)
+    {
+        Book book = books.Find(b => b.Id == id);
+        if (book != null)
+        {
+            book.Title = newTitle;
+            book.Author = newAuthor;
+            book.PublicationYear = newPublicationYear;
+            Console.WriteLine("Book details updated successfully!");
+            SaveBooksToFile();
+        }
+        else
+        {
+            Console.WriteLine("Book ID not found.");
+        }
+    }
+    public void ViewAllUserBorrowings()
+    {
+        if (borrowedBooks.Count == 0)
+        {
+            Console.WriteLine("\nNo books are currently borrowed by any user.");
+            return;
+        }
+        else
+        {
+
+            var userGroups = borrowedBooks.GroupBy(bb => bb.Username);
+
+            Console.WriteLine("\n~ All Users' Borrowed Books ~");
+            Console.WriteLine("========================================");
+
+            foreach (var userGroup in userGroups)
+            {
+                Console.WriteLine($"\nUser: {userGroup.Key}");
+                Console.WriteLine("--------------------------------------------------------");
+                Console.WriteLine("| ID   | Title                | Author         | Year |");
+                Console.WriteLine("--------------------------------------------------------");
+
+                foreach (var borrowedBook in userGroup)
+                {
+                    var book = borrowedBook.Book;
+                    Console.WriteLine($"| {book.Id,-4} | {book.Title,-20} | {book.Author,-15} | {book.PublicationYear,-4} |");
+                }
+
+                Console.WriteLine("--------------------------------------------------------");
+                Console.WriteLine($"Total books borrowed: {userGroup.Count()}");
+            }
+
+            Console.WriteLine("\nSummary:");
+            Console.WriteLine($"Total users with borrowed books: {userGroups.Count()}");
+            Console.WriteLine($"Total books borrowed: {borrowedBooks.Count}");
+        }
+    }
+
+    public void SearchBook(int id)
+    {
+        Book book = books.Find(b => b.Id == id);
+
+        Console.WriteLine("~ Search Result ~");
+
+        if (book != null)
+        {
+            Console.WriteLine("--------------------------------------------------------");
+            Console.WriteLine("| ID   | Title                | Author         | Year |");
+            Console.WriteLine("--------------------------------------------------------");
+            Console.WriteLine($"| {book.Id,-4} | {book.Title,-20} | {book.Author,-15} | {book.PublicationYear,-4} |");
+            Console.WriteLine("--------------------------------------------------------");
+        }
+        else
+        {
+            Console.WriteLine("Book not found.");
+        }
+    }
+    public List<Book> SearchBooksById(int id)
+    {
+        return books.FindAll(b => b.Id == id);
+    }
+
+    public List<Book> SearchBooksByTitle(string title)
+    {
+        return books.FindAll(b => b.Title.Equals(title, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public List<Book> SearchBooksByAuthor(string author)
+    {
+        return books.FindAll(b => b.Author.Equals(author, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public List<Book> SearchBooksByYear(int year)
+    {
+        return books.FindAll(b => b.PublicationYear == year);
+    }
+
+    private void LoadBooksFromFile()
+    {
+        if (!File.Exists(filePath)) return;
+
+        var lines = File.ReadAllLines(filePath);
+        foreach (var line in lines)
+        {
+            books.Add(Book.FromString(line));
+        }
+    }
+
+    private void SaveBooksToFile()
+    {
+        var lines = new List<string>();
+        foreach (var book in books)
+        {
+            lines.Add(book.ToString());
+        }
+        File.WriteAllLines(filePath, lines);
+    }
+
+    private void LoadBorrowedBooksFromFile()
+    {
+        if (!File.Exists(borrowedBooksFilePath)) return;
+
+        var lines = File.ReadAllLines(borrowedBooksFilePath);
+        foreach (var line in lines)
+        {
+            borrowedBooks.Add(BorrowedBook.FromString(line));
+        }
+    }
+
+    private void SaveBorrowedBooksToFile()
+    {
+        var lines = new List<string>();
+        foreach (var borrowedBook in borrowedBooks)
+        {
+            lines.Add(borrowedBook.ToString());
+        }
+        File.WriteAllLines(borrowedBooksFilePath, lines);
+    }
+}
+abstract class LibraryOperationView : LibraryOperation
+{
+    protected Library library;
+    protected string username;
+
+    protected LibraryOperationView(Library library, string username)
+    {
+        this.library = library;
+        this.username = username;
+    }
+
+    protected void ShowBooks()
+    {
+        Console.WriteLine("\nHere is the list of available and borrowed books:");
+        library.ViewBooks(username);
+    }
+}
+
+class AddBook : LibraryOperation
+{
+    private Library library;
+    public AddBook(Library library)
+    {
+        this.library = library;
+    }
+    public override void Execute()
+    {
+        try
+        {
+            Console.Write("Enter book ID: ");
+            int id = int.Parse(Console.ReadLine());
+
+            Console.Write("Enter book title: ");
+            string title = Console.ReadLine();
+
+            Console.Write("Enter author name: ");
+            string author = Console.ReadLine();
+
+            int publicationYear;
+            while (true)
+            {
+                Console.Write("Enter publication year: ");
+                if (int.TryParse(Console.ReadLine(), out publicationYear))
+                {
+                    break;
+                }
+                else
+                {
+                    Console.WriteLine("Invalid input. Please enter a valid year.");
+                }
+            }
+            Book book = new Book { Id = id, Title = title, Author = author, PublicationYear = publicationYear };
+            library.AddBook(book);
+        }
+        catch (FormatException)
+        {
+            Console.WriteLine("Invalid input. Please enter a valid number for book ID and publication year.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"An error occurred: {ex.Message}");
+        }
+    }
+}
+
+class ViewBooks : LibraryOperation
+{
+    private Library library;
+    private string username;
+
+    public ViewBooks(Library library, string username)
+    {
+        this.library = library;
+        this.username = username;
+    }
+
+    public override void Execute()
+    {
+        library.ViewBooks(username);
+    }
+}
+class BorrowedBook
+{
+    public string Username { get; set; }
+    public Book Book { get; set; }
+
+    public static BorrowedBook FromString(string borrowedBookData)
+    {
+        string[] parts = borrowedBookData.Split('|');
+        BorrowedBook borrowedBook = new BorrowedBook();
+        borrowedBook.Username = parts[0];
+        borrowedBook.Book = Book.FromString(string.Join("|", parts.Skip(1)));
+        return borrowedBook;
+    }
+
+    public override string ToString()
+    {
+        return $"{Username}|{Book}";
+    }
+}
+
+class BorrowBook : LibraryOperation
+{
+    private Library library;
+    private string username;
+
+    public BorrowBook(Library library, string username)
+    {
+        this.library = library;
+        this.username = username;
+    }
+
+    public override void Execute()
+    {
+        library.ViewBooks(username);
+        Console.Write("\nEnter Book ID to borrow: ");
+        int id = int.Parse(Console.ReadLine());
+        library.BorrowBook(id, username);
+    }
+}
+
+class ReturnBook : LibraryOperation
+{
+    private Library library;
+    private string username;
+
+    public ReturnBook(Library library, string username)
+    {
+        this.library = library;
+        this.username = username;
+    }
+
+    public override void Execute()
+    {
+        library.ViewBooks(username);
+        Console.Write("\nEnter Book ID to return: ");
+        int id = int.Parse(Console.ReadLine());
+        library.ReturnBook(id, username);
+    }
+}
+class RemoveBook : LibraryOperationView
+{
+    public RemoveBook(Library library, string username) : base(library, username) { }
+
+    public override void Execute()
+    {
+        ShowBooks();
+
+        Console.Write("\nEnter Book ID to remove: ");
+        int id = int.Parse(Console.ReadLine());
+        library.RemoveBook(id);
+    }
+}
+
+class EditBook : LibraryOperationView
+{
+    public EditBook(Library library, string username) : base(library, username) { }
+
+    public override void Execute()
+    {
+        ShowBooks();
+
+        Console.Write("\nEnter Book ID to edit: ");
+        int id = int.Parse(Console.ReadLine());
+
+        Console.Write("Enter new title: ");
+        string title = Console.ReadLine();
+
+        Console.Write("Enter new author name: ");
+        string author = Console.ReadLine();
+
+        Console.Write("Enter new publication year: ");
+        int publicationYear = int.Parse(Console.ReadLine());
+
+        library.EditBook(id, title, author, publicationYear);
+    }
+}
+
+class SearchBook : LibraryOperation
+{
+    private Library library;
+
+    public SearchBook(Library library)
+    {
+        this.library = library;
+    }
+    public override void Execute()
+    {
+        Console.WriteLine("\nSearch by:");
+        Console.WriteLine("1. ID");
+        Console.WriteLine("2. Title");
+        Console.WriteLine("3. Author");
+        Console.WriteLine("4. Publication Year");
+        Console.Write("Enter your choice (1-4): ");
+
+        int choice = int.Parse(Console.ReadLine());
+        List<Book> results = new List<Book>();
+
+        switch (choice)
+        {
+            case 1:
+                Console.Write("Enter Book ID: ");
+                int id = int.Parse(Console.ReadLine());
+                results = library.SearchBooksById(id);
+                break;
+            case 2:
+                Console.Write("Enter Book Title: ");
+                string title = Console.ReadLine();
+                results = library.SearchBooksByTitle(title);
+                break;
+            case 3:
+                Console.Write("Enter Author Name: ");
+                string author = Console.ReadLine();
+                results = library.SearchBooksByAuthor(author);
+                break;
+            case 4:
+                Console.Write("Enter Publication Year: ");
+                int year = int.Parse(Console.ReadLine());
+                results = library.SearchBooksByYear(year);
+                break;
+            default:
+                Console.WriteLine("Invalid choice. Please try again.");
+                return;
+        }
+        DisplaySearchResults(results);
+    }
+
+    private void DisplaySearchResults(List<Book> books)
+    {
+        Console.WriteLine("\n~ Search Results ~");
+
+        if (books.Count == 0)
+        {
+            Console.WriteLine("No books found matching the search criteria.");
+        }
+        else
+        {
+            Console.WriteLine("--------------------------------------------------------");
+            Console.WriteLine("| ID   | Title                | Author         | Year |");
+            Console.WriteLine("--------------------------------------------------------");
+
+            foreach (var book in books)
+            {
+                Console.WriteLine($"| {book.Id,-4} | {book.Title,-20} | {book.Author,-15} | {book.PublicationYear,-4} |");
+            }
+            Console.WriteLine("--------------------------------------------------------");
+        }
+    }
+}
+class ViewUserBorrowings : LibraryOperation
+{
+    private Library library;
+
+    public ViewUserBorrowings(Library library)
+    {
+        this.library = library;
+    }
+
+    public override void Execute()
+    {
+        library.ViewAllUserBorrowings();
+    }
+}
+class ViewUsersOperation : LibraryOperation
+{
+    private UserManager userManager;
+
+    public ViewUsersOperation(UserManager userManager)
+    {
+        this.userManager = userManager;
+    }
+
+    public override void Execute()
+    {
+        userManager.ViewAllUsers();
+    }
+}
+class DeleteAccountOperation : LibraryOperation
+{
+    private UserManager userManager;
+    private User currentUser;
+    public bool AccountDeleted { get; private set; }
+    public bool HasBorrowedBooks { get; private set; }
+
+    public DeleteAccountOperation(UserManager userManager, User currentUser)
+    {
+        this.userManager = userManager;
+        this.currentUser = currentUser;
+        this.AccountDeleted = false;
+        this.HasBorrowedBooks = false;
+    }
+
+    public override void Execute()
+    {
+        var borrowedBooksPath = "BorrowedBooksData.txt";
+        if (File.Exists(borrowedBooksPath))
+        {
+            var borrowedBooks = File.ReadAllLines(borrowedBooksPath)
+                .Where(line => line.StartsWith(currentUser.Username + "|"))
+                .ToList();
+            if (borrowedBooks.Any())
+            {
+                Console.WriteLine("Cannot delete account. Please return all borrowed books first.");
+                HasBorrowedBooks = true;
+                return;
+            }
+        }
+
+        Console.WriteLine("\nWARNING: This action will permanently delete your account.");
+        Console.Write("Please enter your password to confirm: ");
+        string password = Console.ReadLine();
+
+        var (success, error) = userManager.DeleteAccount(currentUser.Username, password);
+        if (success)
+        {
+            Console.WriteLine("Your account has been deleted. You will now be logged out.");
+            this.AccountDeleted = true;
+        }
+        else
+        {
+            Console.WriteLine(error);
+        }
+    }
+}
+class Program
+{
+    static void Main(string[] args)
+    {
+        Library library = new Library();
+        UserManager userManager = new UserManager();
+        User currentUser = null;
+        bool exitProgram = false;
+
+        Console.WriteLine("Welcome to Bookhub!");
+
+        while (!exitProgram)
+        {
+            if (currentUser == null)
+            {
+                try
+                {
+                    Console.WriteLine("\n1. Register");
+                    Console.WriteLine("2. Login");
+                    Console.WriteLine("3. Exit");
+                    Console.Write("Enter your choice (1-3): ");
+
+                    int choice = int.Parse(Console.ReadLine());
+
+                    if (choice == 1)
+                    {
+                        Console.Write("Enter username: ");
+                        string username = Console.ReadLine();
+                        Console.Write("Enter password: ");
+                        string password = Console.ReadLine();
+                        Console.Write("Enter role (student/librarian): ");
+                        string role = Console.ReadLine().ToLower();
+
+                        if (role != "student" && role != "librarian")
+                        {
+                            Console.WriteLine("Invalid role. Please enter 'student' or 'librarian'.");
+                            continue;
+                        }
+                        else
+                        {
+                            User newUser = new User { Username = username, Password = password, Role = role };
+                            userManager.Register(newUser);
+                        }
+                    }
+                    else if (choice == 2)
+                    {
+                        Console.Write("Enter username: ");
+                        string username = Console.ReadLine();
+                        Console.Write("Enter password: ");
+                        string password = Console.ReadLine();
+
+                        currentUser = userManager.Login(username, password);
+                        if (currentUser == null)
+                        {
+                            Console.WriteLine("Invalid username or password. Please try again.");
+                        }
+                    }
+                    else if (choice == 3)
+                    {
+                        exitProgram = true;
+                        Console.WriteLine("Thank you for using Bookhub. Goodbye!");
+                        continue;
+                    }
+                    else
+                    {
+                        Console.WriteLine("Invalid choice. Please enter 1, 2, or 3.");
+                    }
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine("Invalid input. Please enter a number (1, 2, or 3).");
+                }
+            }
+            else
+            {
+                try
+                {
+                    Console.Clear();
+                    Console.WriteLine($"Hello, {currentUser.Username}! You are logged in as a {currentUser.Role}.");
+                    Console.WriteLine("\nOptions:");
+                    if (currentUser.Role == "librarian")
+                    {
+                        Console.WriteLine("1. Add Book");
+                        Console.WriteLine("2. View Books");
+                        Console.WriteLine("3. Borrow Book");
+                        Console.WriteLine("4. Return Book");
+                        Console.WriteLine("5. Remove Book");
+                        Console.WriteLine("6. Edit Book");
+                        Console.WriteLine("7. Search Book");
+                        Console.WriteLine("8. View All Users");
+                        Console.WriteLine("9. View All Users' Borrowed Books");
+                        Console.WriteLine("10. Delete Account");
+                    }
+                    else if (currentUser.Role == "student")
+                    {
+                        Console.WriteLine("2. View Books");
+                        Console.WriteLine("3. Borrow Book");
+                        Console.WriteLine("4. Return Book");
+                        Console.WriteLine("7. Search Book");
+                        Console.WriteLine("10. Delete Account");
+                    }
+                    Console.WriteLine("0. Logout");
+
+                    Console.Write("\nEnter number of your choice: ");
+                    int choice = int.Parse(Console.ReadLine());
+
+                    LibraryOperation operation = null;
+                    if (currentUser.Role == "librarian" || (currentUser.Role == "student" && (choice == 0 || choice == 2 || choice == 3 || choice == 4 || choice == 7 || choice == 10)))
+                    {
+                        switch (choice)
+                        {
+                            case 1:
+                                if (currentUser.Role == "librarian") operation = new AddBook(library);
+                                break;
+                            case 2:
+                                operation = new ViewBooks(library, currentUser.Username);
+                                break;
+                            case 3:
+                                operation = new BorrowBook(library, currentUser.Username);
+                                break;
+                            case 4:
+                                operation = new ReturnBook(library, currentUser.Username);
+                                break;
+                            case 5:
+                                if (currentUser.Role == "librarian") operation = new RemoveBook(library, currentUser.Username);
+                                break;
+                            case 6:
+                                if (currentUser.Role == "librarian") operation = new EditBook(library, currentUser.Username);
+                                break;
+                            case 7:
+                                operation = new SearchBook(library);
+                                break;
+                            case 8:
+                                if (currentUser.Role == "librarian") operation = new ViewUsersOperation(userManager);
+                                break;
+                            case 9:
+                                if (currentUser.Role == "librarian") operation = new ViewUserBorrowings(library);
+                                break;
+                            case 10:
+                                var deleteOperation = new DeleteAccountOperation(userManager, currentUser);
+                                deleteOperation.Execute();
+                                if (deleteOperation.AccountDeleted)
+                                {
+                                    currentUser = null; 
+                                }
+                                else if (!deleteOperation.HasBorrowedBooks)
+                                {
+                                }
+                                continue;
+                            case 0:
+                                currentUser = null;
+                                Console.WriteLine("Logged out successfully.");
+                                continue;
+                            default:
+                                Console.WriteLine("Invalid input. Please choose a valid option.");
+                                continue;
+                        }
+
+                        operation?.Execute();
+                    }
+                    else
+                    {
+                        Console.WriteLine("Access denied. You do not have permission for this operation.");
+                    }
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine("Invalid input. Please enter a valid number.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"An unexpected error occurred: {ex.Message}");
+                }
+                finally
+                {
+                    if (currentUser != null)
+                    {
+                        Console.WriteLine("\nPress any key to continue...");
+                        Console.ReadKey();
+                    }
+                }
+            }
+        }
+    }
+}
